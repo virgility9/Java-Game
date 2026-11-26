@@ -1,6 +1,5 @@
 package main;
 
-import entity.Boss;
 import entity.Player;
 import entity.Monster;
 
