@@ -13,7 +13,7 @@ public class UI {
 
     GamePanel panel;
     Graphics2D g2;
-    Font fontTitle, fontNormal, fontSmall, fontStat;
+    Font fontTitle, fontNormal, fontSmall, fontStat, fontDamage;
 
     // ── INVENTORY MENU (M key) ────────────────────────────────────────────────
     public int selectedSlot = 0;
@@ -55,6 +55,7 @@ public class UI {
         fontNormal = new Font("Monospaced", Font.PLAIN, 16);
         fontSmall  = new Font("Monospaced", Font.PLAIN, 11);
         fontStat   = new Font("Monospaced", Font.BOLD,  14);
+        fontDamage = new Font("Monospaced", Font.BOLD,  20);
         pauseOptionY = new int[pauseOptions.length];
         loadImages();
         initInventory();
@@ -132,7 +133,7 @@ public class UI {
     // Floating message with world position (for damage numbers)
     public void showMessage(String msg, int worldX, int worldY) {
         dialogueText = msg;
-        dialogueTimer = 30;
+        dialogueTimer = 60;
         messageWorldX = worldX;
         messageWorldY = worldY;
     }
@@ -186,9 +187,19 @@ public class UI {
         if (dialogueTimer > 0) {
             int screenX = messageWorldX - panel.player.worldX + panel.player.screenX;
             int screenY = messageWorldY - panel.player.worldY + panel.player.screenY - 30;
-            g2.setFont(fontSmall);
-            g2.setColor(Color.RED);
-            g2.drawString(dialogueText, screenX, screenY);
+            g2.setFont(fontDamage);
+            int textWidth = g2.getFontMetrics().stringWidth(dialogueText);
+            int textX = screenX - textWidth / 2;
+            // Black outline first, so the number reads on grass, dirt and water.
+            g2.setColor(Color.BLACK);
+            for (int dx = -2; dx <= 2; dx++) {
+                for (int dy = -2; dy <= 2; dy++) {
+                    if (dx != 0 || dy != 0) g2.drawString(dialogueText, textX + dx, screenY + dy);
+                }
+            }
+            // Damage in yellow, everything else in white.
+            g2.setColor(dialogueText.startsWith("-") ? Color.YELLOW : Color.WHITE);
+            g2.drawString(dialogueText, textX, screenY);
             dialogueTimer--;
         }
     }

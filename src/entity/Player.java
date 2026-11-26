@@ -73,7 +73,10 @@ public class Player extends Entity {
         this.keyH = keyH;
         screenX = gp.screenWidth / 2 - (gp.tileSize / 2);
         screenY = gp.screenHeight / 2 - (gp.tileSize / 2);
-        solidArea = new Rectangle(8, 16, 32, 32);
+        // Hitbox is the body only, not the whole 48px sprite: 24px wide,
+        // centred, and bottom-aligned so the sprite's edges stop clipping
+        // trees and a monster only hurts you when your bodies overlap.
+        solidArea = new Rectangle(12, 20, 24, 28);
         solidAreaDefaultX = solidArea.x;
         solidAreaDefaultY = solidArea.y;
         setDefaultValues();
@@ -479,15 +482,18 @@ public class Player extends Entity {
     // ── ATTACK HIT CHECK ─────────────────────────────────────────────────────
 
     public void checkAttackHit() {
-        int hitX = worldX, hitY = worldY;
+        // Sword swing: 40px reach in the facing direction, 32px wide,
+        // centred on the player's body — not a whole 48px tile, so a
+        // monster standing diagonally beside you no longer gets hit.
+        int hitX = worldX, hitY = worldY, hitW = 32, hitH = 32;
         switch (direction) {
-            case "up"    -> hitY -= gp.tileSize;
-            case "down"  -> hitY += gp.tileSize;
-            case "left"  -> hitX -= gp.tileSize;
-            case "right" -> hitX += gp.tileSize;
+            case "up"    -> { hitX = worldX + 8;  hitY = worldY - 40; hitW = 32; hitH = 40; }
+            case "down"  -> { hitX = worldX + 8;  hitY = worldY + solidArea.y + solidArea.height; hitW = 32; hitH = 40; }
+            case "left"  -> { hitX = worldX - 40; hitY = worldY + 16; hitW = 40; hitH = 32; }
+            case "right" -> { hitX = worldX + solidArea.x + solidArea.width; hitY = worldY + 16; hitW = 40; hitH = 32; }
         }
 
-        Rectangle attackArea = new Rectangle(hitX, hitY, gp.tileSize, gp.tileSize);
+        Rectangle attackArea = new Rectangle(hitX, hitY, hitW, hitH);
 
         for (int i = 0; i < gp.monsters.size(); i++) {
             Monster monster = gp.monsters.get(i);

@@ -1,6 +1,7 @@
 package entity;
 
 import java.awt.Graphics2D;
+import java.awt.Rectangle;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
 import javax.imageio.ImageIO;
@@ -49,6 +50,12 @@ public class Boss extends Monster {
         speed = 1;
         mapIndex = GamePanel.MAP_BOSS_ROOM;
         monsterType = "Boss";
+        // Boss sprite is drawn 2x (96px) centred on its tile, but Monster's
+        // 32px hitbox only covered its middle — sword swings that visually
+        // hit the boss missed. 64px box centred on the sprite instead.
+        solidArea = new Rectangle(-8, -8, 64, 64);
+        solidAreaDefaultX = solidArea.x;
+        solidAreaDefaultY = solidArea.y;
         getPhase1Images();
         getPhase2Images();
     }
@@ -256,6 +263,8 @@ public class Boss extends Monster {
                 // Boss is larger - draw at 2x size
                 g2.drawImage(image, screenX - gp.tileSize/2, screenY - gp.tileSize/2, 
                             gp.tileSize * 2, gp.tileSize * 2, null);
+                drawHealthBar(g2, screenX - gp.tileSize / 2, screenY - gp.tileSize / 2 - 12,
+                        gp.tileSize * 2, 8);
             }
         }
     }

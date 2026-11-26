@@ -1,5 +1,6 @@
 package entity;
 
+import java.awt.Color;
 import java.awt.Graphics2D;
 import java.awt.Rectangle;
 import java.awt.image.BufferedImage;
@@ -32,7 +33,9 @@ public class Monster extends Entity {
     public Monster(GamePanel gp) {
         super(gp);
         direction = "down";
-        solidArea = new Rectangle(8, 16, 32, 32);
+        // Hitbox is the low, wide body of the slime/orc, not the whole
+        // 48px sprite: the empty space above its head no longer counts.
+        solidArea = new Rectangle(10, 22, 28, 26);
         solidAreaDefaultX = solidArea.x;
         solidAreaDefaultY = solidArea.y;
     }
@@ -143,10 +146,23 @@ public class Monster extends Entity {
 
             if (image != null) {
                 g2.drawImage(image, screenX, screenY, gp.tileSize, gp.tileSize, null);
+                drawHealthBar(g2, screenX, screenY - 10, gp.tileSize, 6);
             }
         }
     }
     
+    protected void drawHealthBar(Graphics2D g2, int x, int y, int width, int height) {
+        if (maxLife <= 0) return;
+        double ratio = Math.max(0.0, Math.min(1.0, (double) life / maxLife));
+        // Black border + dark-red empty bar, so it reads on grass, dirt and water.
+        g2.setColor(Color.BLACK);
+        g2.fillRect(x - 1, y - 1, width + 2, height + 2);
+        g2.setColor(new Color(120, 0, 0));
+        g2.fillRect(x, y, width, height);
+        g2.setColor(ratio > 0.5 ? new Color(0, 200, 0) : ratio > 0.25 ? Color.YELLOW : Color.RED);
+        g2.fillRect(x, y, (int) (width * ratio), height);
+    }
+
     public void damageMonster(int damage) {
         life -= damage;
         gp.ui.showMessage("-" + damage, worldX, worldY);
