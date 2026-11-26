@@ -43,7 +43,7 @@ public class AssetSetter {
         gp.obj[5].mapIndex = 0;
 
         // ── INDOOR MAP (mapIndex = 1) ─────────────────────────────────────────
-        // TODO: Adjust col/row to match your indoor1.txt room layout.
+
         // Open indoor1.txt in your tile editor and find the floor tiles
         // where you want the sword and shield to appear.
 
