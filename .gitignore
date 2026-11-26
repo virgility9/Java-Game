@@ -1,0 +1,7 @@
+*.class
+*.exe
+*.log
+log
+/build/
+/dist/
+/out/
