@@ -177,6 +177,9 @@ public class UI {
             case PLAYING -> drawHUD();
             case MENU    -> drawInventoryMenu();
             case PAUSED  -> drawPauseMenu();
+            // No UI overlay in these states: GamePanel draws the main menu
+            // and cutscene itself, and TRANSITION is just the fade.
+            case MAIN_MENU, CUTSCENE, TRANSITION -> {}
         }
 
         // Draw floating message at world position (damage numbers, etc.)

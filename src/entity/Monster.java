@@ -22,9 +22,12 @@ public class Monster extends Entity {
     public int originalWorldY;
     public String monsterType;
     
-    private int actionLockCounter = 0;
-    private int moveCounter = 0;
-    private static final int ACTION_DELAY = 60;
+    protected int actionLockCounter = 0;
+    protected int moveCounter = 0;
+    protected static final int ACTION_DELAY = 60;
+    // Boss (and any chasing monster) tracks the player inside this range, in pixels.
+    // 240px = 5 tiles at 48px per tile.
+    protected static final int PLAYER_TRACKING_RANGE = 240;
     
     public Monster(GamePanel gp) {
         super(gp);
@@ -44,6 +47,30 @@ public class Monster extends Entity {
             else direction = "right";
             actionLockCounter = 0;
         }
+    }
+
+    protected int getDistanceToPlayer() {
+        int dx = gp.player.worldX - worldX;
+        int dy = gp.player.worldY - worldY;
+        return (int) Math.sqrt(dx * dx + dy * dy);
+    }
+
+    protected void moveTowardPlayer() {
+        int dx = gp.player.worldX - worldX;
+        int dy = gp.player.worldY - worldY;
+        if (Math.abs(dx) > Math.abs(dy)) {
+            direction = dx > 0 ? "right" : "left";
+        } else {
+            direction = dy > 0 ? "down" : "up";
+        }
+    }
+
+    protected void randomMove() {
+        int rand = (int) (Math.random() * 100);
+        if (rand <= 25) direction = "up";
+        else if (rand <= 50) direction = "down";
+        else if (rand <= 75) direction = "left";
+        else direction = "right";
     }
     
     public void update() {

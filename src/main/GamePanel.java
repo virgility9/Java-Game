@@ -558,9 +558,8 @@ public class GamePanel extends JPanel implements Runnable {
 
     // ── SOUND ─────────────────────────────────────────────────────────────────
     public void playMusic(int i) {
-        if (i == 17) {
-            soundURL[17] = getClass().getResource("/sound/FinalBattle.wav");
-        }
+        // soundURL lives on Sound (and Sound's constructor already loads
+        // index 17 = FinalBattle.wav), so there is nothing to set here.
         sound.setMusicFile(i);
         sound.play();
         sound.loop();
