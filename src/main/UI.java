@@ -7,7 +7,6 @@ import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
 import javax.imageio.ImageIO;
 import java.util.ArrayList;
-import java.util.Collections;
 
 public class UI {
 
@@ -63,17 +62,35 @@ public class UI {
 
     public void initInventory() { }
 
+    // Fixed inventory order. The list used to be re-sorted alphabetically on
+    // every add/remove (and rebuilt on every draw), so a slot moved whenever
+    // an item came or went — the button under the cursor changed meaning.
+    // Items now always appear in this order; new items are inserted at their
+    // fixed position.
+    public static final String[] INVENTORY_ORDER =
+        {"Sword", "Axe", "Pickaxe", "Shield", "Blue Shield", "Key", "Potion", "Coin", "Boots", "Tent"};
+
+    private int orderIndex(String name) {
+        for (int i = 0; i < INVENTORY_ORDER.length; i++) {
+            if (INVENTORY_ORDER[i].equals(name)) return i;
+        }
+        return INVENTORY_ORDER.length;
+    }
+
     public void addItem(String itemName, int amount) {
         for (InventoryItem item : inventory) {
             if (item.name.equals(itemName)) {
                 item.count += amount;
-                sortInventory();
                 return;
             }
         }
         BufferedImage icon = getIconForItem(itemName);
-        inventory.add(new InventoryItem(itemName, amount, icon));
-        sortInventory();
+        InventoryItem added = new InventoryItem(itemName, amount, icon);
+        int pos = inventory.size();
+        for (int i = 0; i < inventory.size(); i++) {
+            if (orderIndex(itemName) < orderIndex(inventory.get(i).name)) { pos = i; break; }
+        }
+        inventory.add(pos, added);
     }
 
     public void removeItem(String itemName, int amount) {
@@ -82,7 +99,6 @@ public class UI {
             if (item.name.equals(itemName)) {
                 item.count -= amount;
                 if (item.count <= 0) inventory.remove(i);
-                sortInventory();
                 return;
             }
         }
@@ -113,7 +129,9 @@ public class UI {
     }
 
     public void sortInventory() {
-        Collections.sort(inventory, (a, b) -> a.name.compareTo(b.name));
+        // Kept name for callers; ordering is the fixed INVENTORY_ORDER, not
+        // alphabetical — see addItem.
+        inventory.sort((a, b) -> Integer.compare(orderIndex(a.name), orderIndex(b.name)));
     }
 
     public void updateInventoryFromPlayer() {
@@ -128,6 +146,16 @@ public class UI {
         if (panel.player.hasBoots) addItem("Boots", 1);
         if (panel.player.hasTent > 0) addItem("Tent", panel.player.hasTent);
         sortInventory();
+    }
+
+    // Equip-screen cursor position for a weapon type (-1 = fists/none).
+    public int equipIndexForWeapon(entity.Entity.WeaponType type) {
+        return switch (type) {
+            case SWORD -> 0;
+            case AXE -> 1;
+            case PICKAXE -> 2;
+            default -> 0;
+        };
     }
 
     // Floating message with world position (for damage numbers)
@@ -169,7 +197,7 @@ public class UI {
         this.g2 = g2;
         g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
 
-        if (inEquipment) {
+        if (inEquipment && panel.gameState == GamePanel.GameState.PAUSED) {
             drawEquipmentScreen();
             return;
         }
@@ -228,7 +256,8 @@ public class UI {
 
         g2.setFont(fontSmall);
         g2.setColor(Color.ORANGE);
-        String weaponText = panel.player.hasAxe ? "Axe" : (panel.player.hasSword ? "Sword" : (panel.player.hasPickaxe > 0 ? "Pickaxe" : "Fists"));
+        String equippedName = getEquippedWeaponName();
+        String weaponText = equippedName.isEmpty() ? "Fists" : equippedName;
         g2.drawString("Weapon: " + weaponText, panel.screenWidth - 100, 95);
         g2.setColor(Color.CYAN);
         String shieldText = panel.player.hasBlueShield ? "Blue Shield" : (panel.player.hasWoodShield ? "Wood Shield" : "None");
@@ -268,7 +297,7 @@ public class UI {
         drawStat("Defense", String.valueOf(panel.player.defense),             Color.ORANGE, leftX, statsY + lineHeight*4);
         drawStat("Exp",     panel.player.exp + "/" + panel.player.expNeeded,  Color.CYAN,   leftX, statsY + lineHeight*5);
         drawStat("Coins",   String.valueOf(panel.player.coins),               Color.YELLOW, leftX, statsY + lineHeight*6);
-        drawStat("Weapon",  panel.player.hasSword ? "Sword" : "Fists",        Color.ORANGE, leftX, statsY + lineHeight*7);
+        drawStat("Weapon",  getEquippedWeaponName().isEmpty() ? "Fists" : getEquippedWeaponName(), Color.ORANGE, leftX, statsY + lineHeight*7);
         drawStat("Shield",  panel.player.hasWoodShield ? "Wood Shield" : (panel.player.hasBlueShield ? "Blue Shield" : "None"), Color.ORANGE, leftX, statsY + lineHeight*8);
 
         invRightX = panel.screenWidth - 340;
@@ -384,7 +413,7 @@ public class UI {
         }
         g2.setFont(fontSmall);
         g2.setColor(Color.GRAY);
-        String hint = "";
+        String hint = "[Arrows] Move  [Enter/Click] Select  [ESC] Resume";
         int hintX = panel.screenWidth / 2 - g2.getFontMetrics().stringWidth(hint) / 2;
         g2.drawString(hint, hintX, py + ph - 20);
     }
@@ -415,12 +444,19 @@ public class UI {
         g2.setFont(fontNormal);
         for (int i = 0; i < weaponOptions.length; i++) {
             int y = 180 + i * 50;
+            boolean owned = switch (weaponOptions[i]) {
+                case "Sword" -> panel.player.hasSword;
+                case "Axe" -> panel.player.hasAxe;
+                case "Pickaxe" -> panel.player.hasPickaxe > 0;
+                default -> false;
+            };
+            String label = weaponOptions[i] + (owned ? "  (owned)" : "  (not owned)");
             if (i == equipIndex) {
-                g2.setColor(Color.YELLOW);
-                g2.drawString("> " + weaponOptions[i] + " <", panel.screenWidth/2 - 60, y);
+                g2.setColor(owned ? Color.YELLOW : Color.GRAY);
+                g2.drawString("> " + label + " <", panel.screenWidth/2 - 120, y);
             } else {
-                g2.setColor(Color.WHITE);
-                g2.drawString(weaponOptions[i], panel.screenWidth/2 - 30, y);
+                g2.setColor(owned ? Color.WHITE : Color.DARK_GRAY);
+                g2.drawString(label, panel.screenWidth/2 - 90, y);
             }
         }
         g2.setFont(fontSmall);

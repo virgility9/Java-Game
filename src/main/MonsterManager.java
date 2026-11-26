@@ -156,7 +156,7 @@ public class MonsterManager {
     boss.originalWorldY = boss.worldY;
     boss.monsterType = "Boss";
     gp.monsters.add(boss);
-    System.out.println("🐉 DRAGON BOSS SPAWNED! 🐉");
+    System.out.println("SKELETON LORD SPAWNED!");
 }
     
 }

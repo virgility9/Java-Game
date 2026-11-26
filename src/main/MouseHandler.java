@@ -10,13 +10,27 @@ public class MouseHandler implements MouseListener, MouseMotionListener, MouseWh
 
     public boolean leftClick = false;
     public boolean rightClick = false;
+    // Edge-triggered click: set on press, cleared when a menu handler consumes
+    // it. Menus must use consumeLeftClickEdge(), never the held leftClick
+    // boolean — a held click was being read by three competing handlers and
+    // could fire again in a different state after a state change.
+    public boolean leftClickEdge = false;
+
+    public boolean consumeLeftClickEdge() {
+        boolean pressed = leftClickEdge;
+        leftClickEdge = false;
+        return pressed;
+    }
     public int mouseX = 0;
     public int mouseY = 0;
     public int mouseWheelRotation = 0;
 
     @Override
     public void mousePressed(MouseEvent e) {
-        if (e.getButton() == MouseEvent.BUTTON1) leftClick = true;
+        if (e.getButton() == MouseEvent.BUTTON1) {
+            leftClick = true;
+            leftClickEdge = true;
+        }
         if (e.getButton() == MouseEvent.BUTTON3) rightClick = true;
     }
 

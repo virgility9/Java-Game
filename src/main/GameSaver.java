@@ -92,6 +92,10 @@ public class GameSaver {
             gp.currentMap = Integer.parseInt(reader.readLine());
             
             reader.close();
+            // Rebuild the bonus components from the loaded level/coins and
+            // recalculate attack/defense from them, so the loaded totals are
+            // consistent with the stat formula instead of going stale.
+            gp.player.restoreDerivedStats();
             gp.ui.updateInventoryFromPlayer();
             gp.ui.showMessage("Game Loaded!");
             gp.gameState = GamePanel.GameState.PLAYING;
