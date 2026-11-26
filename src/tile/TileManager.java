@@ -16,7 +16,7 @@ public class TileManager {
     GamePanel gp;
     public Tile[] tile;          // active tile set (points to outdoor or indoor)
     private Tile[] outdoorTiles;
-    private Tile[][] indoorTiles;           // [indoorMapIndex] -> Tile[]
+    private Tile[][] tileSetsByMap;        // [mapIndex] -> Tile[] (house, dungeon, boss room)
     public int[][][] mapTileNum; // [mapIndex][col][row]
 
     public TileManager(GamePanel gp) {
@@ -32,15 +32,23 @@ public class TileManager {
 
         // ----- indoor maps -----
         int maxIndoorMaps = 10;
-        indoorTiles = new Tile[maxIndoorMaps][];
+        tileSetsByMap = new Tile[maxIndoorMaps][];
 
         // House 1 (map index 1)
-        indoorTiles[1] = loadTileSet("/maps/indoortd.txt", "/tiles/");
+        tileSetsByMap[1] = loadTileSet("/maps/indoortd.txt", "/tiles/");
         loadMap("/maps/indoor1.txt", 1);
 
         // House 2 (map index 2)
-        indoorTiles[2] = loadTileSet("/maps/indoortd2.txt", "/tiles/");
+        tileSetsByMap[2] = loadTileSet("/maps/indoortd2.txt", "/tiles/");
         loadMap("/maps/indoor2.txt", 2);
+
+        // Dungeon (map index 3) — previously never loaded; dung.txt sat unused.
+        tileSetsByMap[3] = loadTileSet("/maps/dungtd.txt", "/tiles/");
+        loadMap("/maps/dung.txt", 3);
+
+        // Boss room (map index 4) — previously had no map at all.
+        tileSetsByMap[4] = loadTileSet("/maps/bossroomtd.txt", "/tiles/");
+        loadMap("/maps/bossroom.txt", 4);
 
         // Start on outdoor
         tile = outdoorTiles;
@@ -51,7 +59,11 @@ public class TileManager {
         ArrayList<String> fileNames = new ArrayList<>();
         ArrayList<String> collisions = new ArrayList<>();
 
-        try (InputStream is = getClass().getResourceAsStream(tileDataPath);
+        InputStream resStream = getClass().getResourceAsStream(tileDataPath);
+        if (resStream == null) {
+            throw new IllegalStateException("Missing tile data resource: " + tileDataPath);
+        }
+        try (InputStream is = resStream;
              BufferedReader br = new BufferedReader(new InputStreamReader(is))) {
             String line;
             while ((line = br.readLine()) != null) {
@@ -80,6 +92,10 @@ public class TileManager {
                 return null;
             }
             BufferedImage raw = ImageIO.read(stream);
+            if (raw == null) {
+                System.out.println("Unreadable tile image: " + path);
+                return null;
+            }
             BufferedImage optimized = new BufferedImage(
                 raw.getWidth(), raw.getHeight(), BufferedImage.TYPE_INT_ARGB);
             Graphics2D g2 = optimized.createGraphics();
@@ -97,7 +113,11 @@ public class TileManager {
     }
 
     private void loadWorldSize(String mapPath) {
-        try (InputStream is = getClass().getResourceAsStream(mapPath);
+        InputStream resStream = getClass().getResourceAsStream(mapPath);
+        if (resStream == null) {
+            throw new IllegalStateException("Missing map resource: " + mapPath);
+        }
+        try (InputStream is = resStream;
              BufferedReader br = new BufferedReader(new InputStreamReader(is))) {
             String line;
             int rows = 0, cols = 0;
@@ -116,7 +136,11 @@ public class TileManager {
     }
 
     public void loadMap(String filePath, int mapIndex) {
-        try (InputStream is = getClass().getResourceAsStream(filePath);
+        InputStream resStream = getClass().getResourceAsStream(filePath);
+        if (resStream == null) {
+            throw new IllegalStateException("Missing map resource: " + filePath);
+        }
+        try (InputStream is = resStream;
              BufferedReader br = new BufferedReader(new InputStreamReader(is))) {
             int row = 0;
             String line;
@@ -136,14 +160,17 @@ public class TileManager {
         }
     }
 
-    // Call this when switching maps so the right tile images are used
+    // Call this when switching maps so the right tile images are used.
+    // There is deliberately no outdoor fallback here: a map without a loaded
+    // tile set is a bug, and silently showing outdoor tiles hid exactly that
+    // (the old boss room rendered as an empty outdoor field).
     public void switchTileSet(int mapIndex) {
         if (mapIndex == 0) {
             tile = outdoorTiles;
-        } else if (mapIndex > 0 && mapIndex < indoorTiles.length && indoorTiles[mapIndex] != null) {
-            tile = indoorTiles[mapIndex];
+        } else if (mapIndex > 0 && mapIndex < tileSetsByMap.length && tileSetsByMap[mapIndex] != null) {
+            tile = tileSetsByMap[mapIndex];
         } else {
-            tile = outdoorTiles;
+            throw new IllegalStateException("No tile set loaded for map " + mapIndex);
         }
     }
 

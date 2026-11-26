@@ -34,8 +34,10 @@ public class GamePanel extends JPanel implements Runnable {
 
     public static final int MAP_OUTDOOR = 0;
     public static final int MAP_INDOOR = 1;
-    public static final int MAP_DUNGEON = 2;
-    public static final int MAP_BOSS_ROOM = 3;
+    // House 2 still uses index 2 (its map file is indoor2.txt); the dungeon
+    // is a separate map, not House 2.
+    public static final int MAP_DUNGEON = 3;
+    public static final int MAP_BOSS_ROOM = 4;
 
     // Boss room door control
     public boolean bossDoorClosed = false;
@@ -73,21 +75,42 @@ public class GamePanel extends JPanel implements Runnable {
             returnOutdoorCol = 10;
             returnOutdoorRow = 40;
         }},
-        // DUNGEON ENTRANCE
+        // DUNGEON ENTRANCE -> Dungeon (map 3). Entrance room is at the top
+        // of dung.txt: spawn (25,9), exit tile (25,8) back outdoors.
         new Portal() {{
             outdoorCol = 48;
             outdoorRow = 25;
             indoorMapIndex = 3;
             spawnCol = 25;
-            spawnRow = 20;
+            spawnRow = 9;
             exitCol = 25;
-            exitRow = 30;
+            exitRow = 8;
             returnOutdoorCol = 48;
             returnOutdoorRow = 26;
         }}
     };
 
     private Portal activePortal = null;
+
+    // ── DUNGEON LINKS (transitions between non-outdoor maps) ────────────────
+    // Step-on tiles. The return spawn is never ON a link tile, so a transition
+    // can never ping-pong straight back.
+    private static class DungeonLink {
+        int fromMap, fromCol, fromRow;
+        int toMap, spawnCol, spawnRow;
+        DungeonLink(int fromMap, int fromCol, int fromRow,
+                    int toMap, int spawnCol, int spawnRow) {
+            this.fromMap = fromMap; this.fromCol = fromCol; this.fromRow = fromRow;
+            this.toMap = toMap; this.spawnCol = spawnCol; this.spawnRow = spawnRow;
+        }
+    }
+
+    private final DungeonLink[] dungeonLinks = {
+        // Dungeon stair (tile 37 in dung.txt) -> Boss Room, spawn (25,28).
+        new DungeonLink(MAP_DUNGEON, 26, 41, MAP_BOSS_ROOM, 25, 28),
+        // Boss-room exit (25,30) -> Dungeon, spawn (25,41) beside the stair.
+        new DungeonLink(MAP_BOSS_ROOM, 25, 30, MAP_DUNGEON, 25, 41)
+    };
 
     // ── TRANSITION / FADE ─────────────────────────────────────────────────────
     private int fadeAlpha = 0;
@@ -150,9 +173,8 @@ public class GamePanel extends JPanel implements Runnable {
         player.exp = 0;
         player.expNeeded = 100;
         player.strength = 10;
-        player.defense = 5;
-        player.attackPower = 15;
         player.coins = 0;
+        player.resetBonuses();
         player.hasKey = 0;
         player.hasPotion = 0;
         player.hasSword = false;
@@ -218,23 +240,32 @@ public class GamePanel extends JPanel implements Runnable {
             return;
         }
         
-        if (keyH.escPressed) {
+        // ESC/M pressed during a map fade are swallowed, not acted on when
+        // the fade ends (otherwise an ESC tapped mid-transition would pause
+        // the game the instant you arrive on the new map).
+        if (gameState == GameState.TRANSITION) {
             keyH.escPressed = false;
-            if (gameState == GameState.PLAYING) {
-                gameState = GameState.PAUSED;
-            } else if (gameState == GameState.PAUSED) {
-                gameState = GameState.PLAYING;
-            } else if (gameState == GameState.MENU) {
-                gameState = GameState.PLAYING;
-            }
+            keyH.mPressed = false;
         }
 
-        if (keyH.mPressed) {
-            keyH.mPressed = false;
-            if (gameState == GameState.PLAYING) {
+        // ESC/M are only acted on here while PLAYING. In PAUSED/MENU the
+        // pause/inventory handlers own them — the old top-level branch flipped
+        // PAUSED straight back to PLAYING and made the handlers' own ESC/M
+        // branches dead code.
+        if (gameState == GameState.PLAYING) {
+            if (keyH.escPressed) {
+                keyH.escPressed = false;
+                mouseH.leftClick = false;
+                mouseH.rightClick = false;
+                mouseH.leftClickEdge = false;
+                gameState = GameState.PAUSED;
+            }
+            if (keyH.mPressed) {
+                keyH.mPressed = false;
+                mouseH.leftClick = false;
+                mouseH.rightClick = false;
+                mouseH.leftClickEdge = false;
                 gameState = GameState.MENU;
-            } else if (gameState == GameState.MENU) {
-                gameState = GameState.PLAYING;
             }
         }
 
@@ -248,6 +279,12 @@ public class GamePanel extends JPanel implements Runnable {
                     }
                 }
                 monsterManager.updateRespawn();
+            } else if (currentMap == MAP_DUNGEON) {
+                for (int i = 0; i < monsters.size(); i++) {
+                    if (monsters.get(i) != null) {
+                        monsters.get(i).update();
+                    }
+                }
             } else if (currentMap == MAP_BOSS_ROOM) {
                 // Update boss only
                 for (int i = 0; i < monsters.size(); i++) {
@@ -277,7 +314,11 @@ public class GamePanel extends JPanel implements Runnable {
             checkPortal();
             
         } else if (gameState == GameState.PAUSED) {
-            handlePauseNavigation();
+            if (ui.inEquipment) {
+                handleEquipmentNavigation();
+            } else {
+                handlePauseNavigation();
+            }
         } else if (gameState == GameState.MENU) {
             handleInventoryNavigation();
         } else if (gameState == GameState.TRANSITION) {
@@ -302,12 +343,22 @@ public class GamePanel extends JPanel implements Runnable {
             }
         } else if (currentMap != MAP_OUTDOOR && activePortal != null) {
             if (playerCol == activePortal.exitCol && playerRow == activePortal.exitRow) {
-                if (currentMap == MAP_BOSS_ROOM && bossDoorClosed && !bossDefeated) {
+                startTransition(MAP_OUTDOOR, activePortal.returnOutdoorCol, activePortal.returnOutdoorRow);
+                activePortal = null;
+                return;
+            }
+        }
+
+        // Dungeon <-> boss-room links (the boss room is entered by a link, not
+        // by a portal, so activePortal is null there).
+        for (DungeonLink link : dungeonLinks) {
+            if (currentMap == link.fromMap && playerCol == link.fromCol && playerRow == link.fromRow) {
+                if (link.fromMap == MAP_BOSS_ROOM && bossDoorClosed && !bossDefeated) {
                     ui.showMessage("The door is locked! Defeat the boss first!");
                     return;
                 }
-                startTransition(MAP_OUTDOOR, activePortal.returnOutdoorCol, activePortal.returnOutdoorRow);
-                activePortal = null;
+                startTransition(link.toMap, link.spawnCol, link.spawnRow);
+                return;
             }
         }
     }
@@ -355,11 +406,13 @@ public class GamePanel extends JPanel implements Runnable {
             monsters.removeIf(m -> m.mapIndex == MAP_BOSS_ROOM);
             monsterManager.spawnBoss();
             playMusic(17); // Boss battle music
-            ui.showMessage("The doors close behind you! Defeat the DRAGON!", player.worldX, player.worldY);
+            ui.showMessage("The doors close behind you! Defeat the SKELETON LORD!", player.worldX, player.worldY);
         } else {
             stopMusic();
             if (currentMap == MAP_INDOOR) {
                 playMusic(1);
+            } else if (currentMap == MAP_DUNGEON) {
+                playMusic(2); // Dungeon music (Dungeon.wav)
             } else {
                 playMusic(0);
             }
@@ -385,19 +438,62 @@ public class GamePanel extends JPanel implements Runnable {
             gameState = GameState.PLAYING;
         }
         ui.updatePauseHover(mouseH.mouseX, mouseH.mouseY);
-        if (mouseH.leftClick) {
-            mouseH.leftClick = false;
+        if (mouseH.consumeLeftClickEdge()) {
             int clicked = ui.getPauseOptionAt(mouseH.mouseX, mouseH.mouseY);
             if (clicked >= 0) handlePauseSelection(clicked);
         }
+    }
+
+    // ── EQUIPMENT SCREEN (from pause menu) ───────────────────────────────────
+    // Keyboard only, matching the main menu. ESC closes back to the pause menu.
+    private void handleEquipmentNavigation() {
+        if (keyH.upPressed) {
+            keyH.upPressed = false;
+            ui.equipIndex = (ui.equipIndex - 1 + ui.weaponOptions.length) % ui.weaponOptions.length;
+        }
+        if (keyH.downPressed) {
+            keyH.downPressed = false;
+            ui.equipIndex = (ui.equipIndex + 1) % ui.weaponOptions.length;
+        }
+        if (keyH.enterPressed) {
+            keyH.enterPressed = false;
+            equipSelectedWeapon();
+        }
+        if (keyH.escPressed) {
+            keyH.escPressed = false;
+            ui.inEquipment = false;
+        }
+    }
+
+    private void equipSelectedWeapon() {
+        String name = ui.weaponOptions[ui.equipIndex];
+        entity.Entity.WeaponType type = switch (name) {
+            case "Sword" -> entity.Entity.WeaponType.SWORD;
+            case "Axe" -> entity.Entity.WeaponType.AXE;
+            case "Pickaxe" -> entity.Entity.WeaponType.PICKAXE;
+            default -> entity.Entity.WeaponType.NONE;
+        };
+        if (player.equipWeapon(type)) {
+            ui.inEquipment = false;
+            ui.showMessage(name + " equipped!");
+        }
+        // If not owned, stay on the equipment screen: it already marks the
+        // weapon "(not owned)", so the failure is visible without a popup.
     }
 
     private void handlePauseSelection(int index) {
         switch (index) {
             case 0 -> gameSaver.saveGame();
             case 1 -> gameSaver.loadGame();
-            case 2 -> gameState = GameState.PLAYING;
-            case 3 -> gameState = GameState.MAIN_MENU;
+            case 2 -> {
+                ui.inEquipment = true;
+                ui.equipIndex = ui.equipIndexForWeapon(player.equippedWeapon);
+            }
+            case 3 -> gameState = GameState.PLAYING;
+            case 4 -> {
+                ui.inEquipment = false;
+                gameState = GameState.MAIN_MENU;
+            }
         }
     }
 
@@ -429,8 +525,7 @@ public class GamePanel extends JPanel implements Runnable {
             gameState = GameState.PLAYING;
         }
         ui.updateInventoryHover(mouseH.mouseX, mouseH.mouseY);
-        if (mouseH.leftClick) {
-            mouseH.leftClick = false;
+        if (mouseH.consumeLeftClickEdge()) {
             int clicked = ui.getInventorySlotAt(mouseH.mouseX, mouseH.mouseY);
             if (clicked >= 0) {
                 ui.selectedSlot = clicked;
@@ -458,26 +553,32 @@ public class GamePanel extends JPanel implements Runnable {
             }
             case "Coin" -> System.out.println("Coins: " + player.coins);
             case "Sword" -> {
-                if (!player.hasSword) {
-                    player.hasSword = true;
-                    player.attackPower += 5;
-                    ui.removeItem("Sword", 1);
+                // The old branch added +5 ATK to a player who already owned the
+                // sword (pickup sets hasSword), so it never ran — and the +5
+                // would have been wiped by the next frame anyway. Equipping is
+                // now real: it selects the weapon and recalculates stats.
+                if (player.equipWeapon(entity.Entity.WeaponType.SWORD)) {
                     System.out.println("Equipped sword! ATK: " + player.attackPower);
                 } else {
-                    System.out.println("Sword already equipped!");
+                    System.out.println("You don't have a sword!");
                 }
             }
             case "Shield" -> {
-                if (!player.hasWoodShield) {
-                    player.hasWoodShield = true;
-                    player.defense += 3;
-                    ui.removeItem("Shield", 1);
-                    System.out.println("Equipped shield! DEF: " + player.defense);
+                // Shields are passive once picked up (they add defense and
+                // enable blocking); there is nothing to equip from inventory.
+                if (player.hasWoodShield || player.hasBlueShield) {
+                    System.out.println("Shield already equipped (passive)!");
                 } else {
-                    System.out.println("Shield already equipped!");
+                    System.out.println("You don't have a shield!");
                 }
             }
-            case "Axe" -> System.out.println("Axe - can cut trees");
+            case "Axe" -> {
+                if (player.equipWeapon(entity.Entity.WeaponType.AXE)) {
+                    System.out.println("Equipped axe! ATK: " + player.attackPower);
+                } else {
+                    System.out.println("You don't have an axe!");
+                }
+            }
             case "Boots" -> System.out.println("Boots - increases speed");
             case "Tent" -> {
                 if (player.hasTent > 0) {
@@ -518,7 +619,7 @@ public class GamePanel extends JPanel implements Runnable {
             }
         }
 
-        if (currentMap == MAP_OUTDOOR || currentMap == MAP_BOSS_ROOM) {
+        if (currentMap == MAP_OUTDOOR || currentMap == MAP_DUNGEON || currentMap == MAP_BOSS_ROOM) {
             for (Monster monster : monsters) {
                 if (monster != null && monster.mapIndex == currentMap) {
                     monster.draw(g2);
