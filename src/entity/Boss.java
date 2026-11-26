@@ -133,6 +133,25 @@ public class Boss extends Monster {
     
     @Override
     public void update() {
+        // Enemy invincibility frames (same 10-frame window as other monsters).
+        if (invincible) {
+            invincibleCounter++;
+            if (invincibleCounter > MONSTER_IFRAMES) {
+                invincible = false;
+                invincibleCounter = 0;
+            }
+        }
+        // Stunned by a hit: skip movement and attacks this frame.
+        if (hitStun > 0) {
+            hitStun--;
+            spriteCounter++;
+            if (spriteCounter > 12) {
+                spriteNum = (spriteNum == 1) ? 2 : 1;
+                spriteCounter = 0;
+            }
+            return;
+        }
+
         // Phase change at 50% HP
         if (life <= originalMaxLife / 2 && phase == 1) {
             phase = 2;
@@ -142,18 +161,15 @@ public class Boss extends Monster {
             gp.ui.showMessage("SKELETON LORD ENRAGED!", worldX, worldY);
         }
         
-        // Special attack pattern every 120 frames in phase 2
+        // Special attack pattern every 120 frames in phase 2. It goes through
+        // the player's single damage method like every other hit, so defense
+        // and blocking apply — the old copy dealt attack+20 with no defense
+        // subtraction at all.
         attackPatternCounter++;
         if (attackPatternCounter >= 120 && phase == 2) {
             if (gp.cChecker.checkMonsterCollision(this)) {
-                int damage = attack + 20;
-                if (!gp.player.invincible) {
-                    gp.player.life -= damage;
-                    gp.player.invincible = true;
-                    gp.player.invincibleCounter = 0;
-                    gp.ui.showMessage("💀 " + damage + " DAMAGE! 💀", worldX, worldY);
-                    System.out.println("Skeleton Lord used special attack! Dealt " + damage + " damage!");
-                }
+                gp.player.takeDamage(attack + 20, this, 40);
+                System.out.println("Skeleton Lord used special attack!");
             }
             attackPatternCounter = 0;
         }
@@ -178,25 +194,9 @@ public class Boss extends Monster {
             moveCounter = 0;
         }
         
-        // Check monster-player collision for damage
+        // Touch damage goes through the player's single damage method.
         if (gp.cChecker.checkMonsterCollision(this)) {
-            if (!gp.player.invincible) {
-                int damage = attack - gp.player.defense;
-                if (damage < 1) damage = 1;
-                gp.player.life -= damage;
-                gp.player.invincible = true;
-                gp.player.invincibleCounter = 0;
-                gp.ui.showMessage("-" + damage, worldX, worldY);
-                System.out.println(name + " hit! Dealt " + damage + " damage!");
-                
-                // Knockback
-                switch(direction) {
-                    case "up": gp.player.worldY += 40; break;
-                    case "down": gp.player.worldY -= 40; break;
-                    case "left": gp.player.worldX += 40; break;
-                    case "right": gp.player.worldX -= 40; break;
-                }
-            }
+            gp.player.takeDamage(attack, this, 40);
         }
         
         spriteCounter++;
@@ -271,7 +271,7 @@ public class Boss extends Monster {
     
     @Override
     public void damageMonster(int damage) {
-        life -= damage;
+        if (!beginDamage(damage)) return;
         gp.ui.showMessage("-" + damage, worldX, worldY);
         System.out.println(name + " took " + damage + " damage! HP: " + life + "/" + maxLife);
         if (life <= 0) {

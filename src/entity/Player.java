@@ -16,12 +16,36 @@ public class Player extends Entity {
     public final int screenX;
     public final int screenY;
     
-    // Invincibility frames
-    public boolean invincible = false;
-    public int invincibleCounter = 0;
-    
+    // Invincibility frames live on Entity (invincible / invincibleCounter);
+    // Player used to redeclare them, shadowing the base fields. Do not add
+    // them back here.
+
     // Coin bonus tracking
     private int lastCoinBonus = 0;
+
+    // ── STAT FORMULA (Phase 1) ───────────────────────────────────────────────
+    // attackPower and defense are DERIVED values, recalculated only when a
+    // component changes (pickup, equip, level-up, coin threshold) — never
+    // assigned every frame, so bonuses survive the next update.
+    //   attackPower = weapon attack + levelAttackBonus + coinAttackBonus
+    //   defense     = BASE_DEFENSE + shieldDefense + levelDefenseBonus + coinDefenseBonus
+    // Weapon attack totals at level 1: Fists 5, Sword 15, Axe 20, Pickaxe 12.
+    // Defense totals at level 1: no shield 5, wood shield 5, blue shield 8
+    // (shieldDefense is the bonus OVER base: none 0, wood 0, blue 3 — the old
+    // code set defense to 5 with wood and 0 with no shield, so wood's total
+    // was already 5; base defense 5 is what was missing).
+    // strength grows with level (+5 per level-up) and is shown in the status
+    // panel, but it is NOT part of the damage formula — damage uses
+    // attackPower above. It is kept as a legacy/display stat on purpose.
+    public static final int BASE_DEFENSE = 5;
+    public static final int FISTS_ATTACK = 5;
+    public static final int SWORD_ATTACK = 15;
+    public static final int AXE_ATTACK = 20;
+    public static final int PICKAXE_ATTACK = 12;
+    public int levelAttackBonus = 0;
+    public int levelDefenseBonus = 0;
+    public int coinAttackBonus = 0;
+    public int coinDefenseBonus = 0;
 
     // PLAYER STATS
     public int maxLife = 100;
@@ -33,7 +57,8 @@ public class Player extends Entity {
     public int expNeeded = 100;
     public int strength = 10;
     public int defense = 5;
-    public int attackPower = 15;
+    public int attackPower = 5;
+    // Bonus defense from the shield, over BASE_DEFENSE: none 0, wood 0, blue 3.
     public int shieldDefense = 0;
 
     // INVENTORY
@@ -150,48 +175,91 @@ public class Player extends Entity {
 
     // ── WEAPON / SHIELD STATE ─────────────────────────────────────────────────
 
-    public void updateWeaponType() {
-        if (equippedWeapon == WeaponType.AXE && hasAxe) {
-            currentWeapon = WeaponType.AXE;
-            attackPower = 20;
-        } else if (equippedWeapon == WeaponType.SWORD && hasSword) {
-            currentWeapon = WeaponType.SWORD;
-            attackPower = 15;
-        } else if (equippedWeapon == WeaponType.PICKAXE && hasPickaxe > 0) {
-            currentWeapon = WeaponType.PICKAXE;
-            attackPower = 12;
-        } else {
-            if (hasAxe) {
-                currentWeapon = WeaponType.AXE;
-                attackPower = 20;
-                equippedWeapon = WeaponType.AXE;
-            } else if (hasSword) {
-                currentWeapon = WeaponType.SWORD;
-                attackPower = 15;
-                equippedWeapon = WeaponType.SWORD;
-            } else if (hasPickaxe > 0) {
-                currentWeapon = WeaponType.PICKAXE;
-                attackPower = 12;
-                equippedWeapon = WeaponType.PICKAXE;
-            } else {
-                currentWeapon = WeaponType.NONE;
-                attackPower = 5;
-                equippedWeapon = WeaponType.NONE;
-            }
-        }
+    // Recalculate attackPower/defense from their components. Called only when
+    // a component changes (equip, pickup, level-up, coin bonus, load, new game).
+    public void recalcStats() {
+        int weaponAttack = switch (currentWeapon) {
+            case AXE -> AXE_ATTACK;
+            case SWORD -> SWORD_ATTACK;
+            case PICKAXE -> PICKAXE_ATTACK;
+            default -> FISTS_ATTACK;
+        };
+        attackPower = weaponAttack + levelAttackBonus + coinAttackBonus;
+        shieldDefense = hasBlueShield ? 3 : 0;
+        defense = BASE_DEFENSE + shieldDefense + levelDefenseBonus + coinDefenseBonus;
     }
 
-    public void updateShieldDefense() {
-        if (hasBlueShield) {
-            shieldDefense = 8;
-            defense = 8;
-        } else if (hasWoodShield) {
-            shieldDefense = 5;
-            defense = 5;
-        } else {
-            shieldDefense = 0;
-            defense = 0;
+    // Rebuild the bonus components from level and coins (used after loading a
+    // save: the old 26-line format stores totals, not the components, and the
+    // components are deterministic functions of level and coins — +3 ATK /
+    // +2 DEF per level above 1, +2 ATK / +1 DEF per 100 coins. lastCoinBonus
+    // is set to the last crossed threshold so the coin bonus is not awarded
+    // again on the next frame. Full versioned save data is Phase 2.
+    public void restoreDerivedStats() {
+        levelAttackBonus = 3 * Math.max(0, level - 1);
+        levelDefenseBonus = 2 * Math.max(0, level - 1);
+        strength = 10 + 5 * Math.max(0, level - 1);
+        int thresholds = Math.max(0, coins / 100);
+        coinAttackBonus = 2 * thresholds;
+        coinDefenseBonus = thresholds;
+        lastCoinBonus = thresholds * 100;
+        equippedWeapon = WeaponType.NONE;
+        currentWeapon = WeaponType.NONE;
+        recalcStats();
+    }
+
+    // Reset all bonus components (new game). Base stats are set by the caller.
+    public void resetBonuses() {
+        levelAttackBonus = 0;
+        levelDefenseBonus = 0;
+        coinAttackBonus = 0;
+        coinDefenseBonus = 0;
+        lastCoinBonus = 0;
+        equippedWeapon = WeaponType.NONE;
+        currentWeapon = WeaponType.NONE;
+        recalcStats();
+    }
+
+    // Equip a weapon the player owns. Returns false (and changes nothing) if
+    // the player does not own it. Used by the equipment screen and inventory.
+    public boolean equipWeapon(WeaponType type) {
+        boolean owned = switch (type) {
+            case AXE -> hasAxe;
+            case SWORD -> hasSword;
+            case PICKAXE -> hasPickaxe > 0;
+            case NONE -> true;
+        };
+        if (!owned) return false;
+        equippedWeapon = type;
+        currentWeapon = type;
+        recalcStats();
+        return true;
+    }
+
+    // Resolve the current weapon from what the player owns, without touching
+    // stats. Returns true only if the selected weapon changed (caller then
+    // recalculates). Runs every frame; it is cheap and writes nothing unless
+    // the selection actually changes (e.g. a weapon was just picked up).
+    private boolean resolveWeaponSelection() {
+        WeaponType wanted = equippedWeapon;
+        boolean owned = switch (wanted) {
+            case AXE -> hasAxe;
+            case SWORD -> hasSword;
+            case PICKAXE -> hasPickaxe > 0;
+            default -> false;
+        };
+        if (!owned) {
+            if (hasAxe) wanted = WeaponType.AXE;
+            else if (hasSword) wanted = WeaponType.SWORD;
+            else if (hasPickaxe > 0) wanted = WeaponType.PICKAXE;
+            else wanted = WeaponType.NONE;
+            equippedWeapon = wanted;
         }
+        if (wanted != currentWeapon) {
+            currentWeapon = wanted;
+            return true;
+        }
+        return false;
     }
 
     // ── ATTACK FRAME SELECTOR ────────────────────────────────────────────────
@@ -230,8 +298,9 @@ public class Player extends Entity {
             lastCoinBonus = coins;
             maxLife += 5;
             life += 5;
-            attackPower += 2;
-            defense += 1;
+            coinAttackBonus += 2;
+            coinDefenseBonus += 1;
+            recalcStats();
             gp.ui.showMessage("COIN BONUS! +5 HP, +2 ATK, +1 DEF", worldX, worldY);
             System.out.println("💰 COIN BONUS! New stats - HP: " + maxLife + ", ATK: " + attackPower + ", DEF: " + defense);
             gp.playSE(12);
@@ -241,9 +310,8 @@ public class Player extends Entity {
     // ── MAIN UPDATE ───────────────────────────────────────────────────────────
 
     public void update() {
-        updateWeaponType();
-        updateShieldDefense();
-        
+        if (resolveWeaponSelection()) recalcStats();
+
         checkCoinBonus();
 
         if (attackCooldown > 0) {
@@ -460,23 +528,69 @@ public class Player extends Entity {
                 monster.solidArea.height
             );
 
-            if (playerRect.intersects(monsterRect) && !invincible) {
-                int damage = monster.attack - defense;
-                if (damage < 1) damage = 1;
-                life -= damage;
-                invincible = true;
-                invincibleCounter = 0;
-                gp.ui.showMessage("-" + damage, worldX, worldY);
-                System.out.println("Took " + damage + " damage! HP: " + life);
-                
-                switch(direction) {
-                    case "up": worldY += 30; break;
-                    case "down": worldY -= 30; break;
-                    case "left": worldX += 30; break;
-                    case "right": worldX -= 30; break;
-                }
+            if (playerRect.intersects(monsterRect)) {
+                takeDamage(monster.attack, monster, 30);
             }
         }
+    }
+
+    // ── DAMAGE TO THE PLAYER (single choke point) ─────────────────────────────
+    // Every source of damage to the player — Monster.update, Boss.update
+    // (including its phase-2 special), Player.checkMonsterCollision — calls
+    // this one method. There used to be three copies of the same
+    // attack-minus-defense / i-frames / knockback block, and the boss special
+    // skipped defense entirely. Returns true if damage was applied.
+    // Blocking: if the player is blocking and the attacker is in front of
+    // them (on the side they are facing), the hit is fully prevented and the
+    // block goes on a short lockout (blockCooldown = 30 frames, ~0.5s) during
+    // which a new block cannot be started. A hit from behind or the side
+    // deals full damage. Knockback pushes the player AWAY from the attacker,
+    // not along either fighter's facing direction.
+    public boolean takeDamage(int incomingAttack, Monster attacker, int knockbackPx) {
+        if (invincible) return false;
+
+        if (blocking && attacker != null && isAttackerInFront(attacker)) {
+            blocking = false;
+            blockCooldown = 30;
+            gp.ui.showMessage("BLOCKED!", worldX, worldY);
+            return false;
+        }
+
+        int damage = incomingAttack - defense;
+        if (damage < 1) damage = 1;
+        life -= damage;
+        invincible = true;
+        invincibleCounter = 0;
+        gp.ui.showMessage("-" + damage, worldX, worldY);
+        System.out.println("Took " + damage + " damage! HP: " + life);
+
+        if (attacker != null) {
+            int pcx = worldX + solidArea.x + solidArea.width / 2;
+            int pcy = worldY + solidArea.y + solidArea.height / 2;
+            int acx = attacker.worldX + attacker.solidArea.x + attacker.solidArea.width / 2;
+            int acy = attacker.worldY + attacker.solidArea.y + attacker.solidArea.height / 2;
+            if (Math.abs(acx - pcx) > Math.abs(acy - pcy)) {
+                worldX += (pcx > acx) ? knockbackPx : -knockbackPx;
+            } else {
+                worldY += (pcy > acy) ? knockbackPx : -knockbackPx;
+            }
+        }
+        return true;
+    }
+
+    // Is the attacker on the side the player is facing?
+    public boolean isAttackerInFront(Monster attacker) {
+        int pcx = worldX + solidArea.x + solidArea.width / 2;
+        int pcy = worldY + solidArea.y + solidArea.height / 2;
+        int acx = attacker.worldX + attacker.solidArea.x + attacker.solidArea.width / 2;
+        int acy = attacker.worldY + attacker.solidArea.y + attacker.solidArea.height / 2;
+        return switch (direction) {
+            case "up" -> acy < pcy;
+            case "down" -> acy > pcy;
+            case "left" -> acx < pcx;
+            case "right" -> acx > pcx;
+            default -> false;
+        };
     }
 
     // ── ATTACK HIT CHECK ─────────────────────────────────────────────────────
@@ -586,8 +700,9 @@ public class Player extends Entity {
         maxManaCrystals++;
         
         strength += 5;
-        attackPower += 3;
-        defense += 2;
+        levelAttackBonus += 3;
+        levelDefenseBonus += 2;
+        recalcStats();
         
         System.out.println("🎉 LEVEL UP! Now level " + level + "!");
         System.out.println("❤️ Heart container increased! Max HP: " + maxLife);

@@ -25,6 +25,10 @@ public class Monster extends Entity {
     
     protected int actionLockCounter = 0;
     protected int moveCounter = 0;
+    // Hit reaction: frames the monster is stunned after taking a hit, and its
+    // own brief invincibility so one swing cannot damage it twice.
+    public int hitStun = 0;
+    public static final int MONSTER_IFRAMES = 10;
     protected static final int ACTION_DELAY = 60;
     // Boss (and any chasing monster) tracks the player inside this range, in pixels.
     // 240px = 5 tiles at 48px per tile.
@@ -77,6 +81,25 @@ public class Monster extends Entity {
     }
     
     public void update() {
+        // Enemy invincibility frames tick down here (Entity.invincible).
+        if (invincible) {
+            invincibleCounter++;
+            if (invincibleCounter > MONSTER_IFRAMES) {
+                invincible = false;
+                invincibleCounter = 0;
+            }
+        }
+        // Stunned by a hit: no movement, no touching damage this frame.
+        if (hitStun > 0) {
+            hitStun--;
+            spriteCounter++;
+            if (spriteCounter > 12) {
+                spriteNum = (spriteNum == 1) ? 2 : 1;
+                spriteCounter = 0;
+            }
+            return;
+        }
+
         setAction();
         
         // Use move counter for smoother movement
@@ -97,25 +120,10 @@ public class Monster extends Entity {
             moveCounter = 0;
         }
         
-        // Check monster-player collision for damage
+        // Touch damage goes through the player's single damage method
+        // (blocking, defense, i-frames, knockback all live there now).
         if (gp.cChecker.checkMonsterCollision(this)) {
-            if (!gp.player.invincible) {
-                int damage = attack - gp.player.defense;
-                if (damage < 1) damage = 1;
-                gp.player.life -= damage;
-                gp.player.invincible = true;
-                gp.player.invincibleCounter = 0;
-                gp.ui.showMessage("-" + damage, worldX, worldY);
-                System.out.println(name + " hit! Dealt " + damage + " damage!");
-                
-                // Knockback
-                switch(direction) {
-                    case "up": gp.player.worldY += 30; break;
-                    case "down": gp.player.worldY -= 30; break;
-                    case "left": gp.player.worldX += 30; break;
-                    case "right": gp.player.worldX -= 30; break;
-                }
-            }
+            gp.player.takeDamage(attack, this, 30);
         }
         
         spriteCounter++;
@@ -163,8 +171,29 @@ public class Monster extends Entity {
         g2.fillRect(x, y, (int) (width * ratio), height);
     }
 
-    public void damageMonster(int damage) {
+    // Shared hit reaction for monsters and the boss: brief invincibility so
+    // one swing cannot hit twice, a short stun, and knockback away from the
+    // player. Returns false if the hit was ignored (still invincible).
+    protected boolean beginDamage(int damage) {
+        if (invincible) return false;
         life -= damage;
+        invincible = true;
+        invincibleCounter = 0;
+        hitStun = 10;
+        int pcx = gp.player.worldX + gp.player.solidArea.x + gp.player.solidArea.width / 2;
+        int pcy = gp.player.worldY + gp.player.solidArea.y + gp.player.solidArea.height / 2;
+        int mcx = worldX + solidArea.x + solidArea.width / 2;
+        int mcy = worldY + solidArea.y + solidArea.height / 2;
+        if (Math.abs(mcx - pcx) > Math.abs(mcy - pcy)) {
+            worldX += (mcx > pcx) ? 12 : -12;
+        } else {
+            worldY += (mcy > pcy) ? 12 : -12;
+        }
+        return true;
+    }
+
+    public void damageMonster(int damage) {
+        if (!beginDamage(damage)) return;
         gp.ui.showMessage("-" + damage, worldX, worldY);
         if (life <= 0) {
             die();
